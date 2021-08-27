@@ -4,12 +4,12 @@ micronaut:
 
 datasources:
   default:
-    url: jdbc:mysql://localhost:3306/pix_keymanager_grpc?useTimezone=true&serverTimezone=America/Sao_Paulo
-    driverClassName: com.mysql.cj.jdbc.Driver
+    url: jdbc:postgresql://localhost:5432/pix_keymanager_grpc
+    driverClassName: org.postgresql.Driver
     username: root
-    password: 123456
+    password: 123457
     schema-generate: CREATE_DROP
-    dialect: MYSQL
+    dialect: POSTGRES
 
 jpa.default.properties.hibernate.hbm2ddl.auto: update
 jpa.default.properties.hibernate.show_sql: true
