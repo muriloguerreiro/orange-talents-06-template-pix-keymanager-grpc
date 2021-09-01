@@ -46,4 +46,7 @@ class ChavePix(
         return "ChavePix(clienteId=$clienteId, tipo=$tipo, chave='$chave', tipoDeConta=$tipoDeConta)"
     }
 
+    fun atualiza(key: String) {
+        chave = key
+    }
 }

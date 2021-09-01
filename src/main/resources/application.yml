@@ -19,6 +19,6 @@ itau:
   contas:
     url: 'http://localhost:9091'
 
-bc:
+bcb:
   pix:
     url: 'http://localhost:8082'
