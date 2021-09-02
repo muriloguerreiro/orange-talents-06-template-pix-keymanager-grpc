@@ -2,11 +2,7 @@ package br.com.zupacademy.murilo.registro
 
 import br.com.zupacademy.murilo.RegistroChavePixRequest
 import br.com.zupacademy.murilo.RegistroPixKeymanagerGrpcServiceGrpc
-import br.com.zupacademy.murilo.TipoDeChave as TipoDeChaveStub
-import br.com.zupacademy.murilo.TipoDeConta as TipoDeContaStub
-import br.com.zupacademy.murilo.chave.ChavePix
-import br.com.zupacademy.murilo.chave.ChavePixRepository
-import br.com.zupacademy.murilo.chave.ContaAssociada
+import br.com.zupacademy.murilo.bcb.*
 import br.com.zupacademy.murilo.chave.*
 import br.com.zupacademy.murilo.itau.ItauClient
 import io.grpc.ManagedChannel
@@ -19,14 +15,17 @@ import io.micronaut.grpc.server.GrpcServerChannel
 import io.micronaut.http.HttpResponse
 import io.micronaut.test.annotation.MockBean
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.mockito.Mockito
-import java.awt.image.TileObserver
+import java.time.LocalDateTime
 import java.util.*
 import javax.inject.Inject
+import br.com.zupacademy.murilo.TipoDeChave as TipoDeChaveStub
+import br.com.zupacademy.murilo.TipoDeConta as TipoDeContaStub
 
 @MicronautTest(transactional = false)
 internal class RegistroChaveEndpointTest(
@@ -35,7 +34,10 @@ internal class RegistroChaveEndpointTest(
 ) {
 
     @Inject
-    lateinit var itauClient: ItauClient;
+    lateinit var itauClient: ItauClient
+
+    @Inject
+    lateinit var bcbClient: BcbClient
 
     companion object {
         val randomId = UUID.randomUUID()
@@ -48,26 +50,21 @@ internal class RegistroChaveEndpointTest(
 
     @Test
     fun `deve registrar nova chave pix`() {
-        Mockito.`when`(itauClient.buscaContaPorTipo(clienteId = randomId.toString(), tipo = "CONTA_CORRENTE"))
-            .thenReturn(HttpResponse.ok(
-                DadosDaContaResponse(
-                    tipo = "CONTA_CORRENTE",
-                    instituicao = InstituicaoResponse(
-                        nome = "ITAÚ UNIBANCO S.A.",
-                        ispb = "60701190"
-                    ),
-                    agencia = "0001",
-                    numero = "483201",
-                    titular = TitularResponse(
-                        nome = "Alefh Silva",
-                        cpf = "83082363083"
-                    )
-                )))
+        Mockito.`when`(itauClient.buscaContaPorTipo(clienteId = "c56dfef4-7901-44fb-84e2-a2cefb157890", tipo = "CONTA_CORRENTE"))
+            .thenReturn(HttpResponse.ok(dadosDaContaResponse()))
+
+        Mockito.`when`(bcbClient.registraChave(createPixKeyRequest(
+            keyType = TipoDeChaveStub.EMAIL.toString(),
+            key = "alefh@gmail.com"
+        ))).thenReturn(HttpResponse.created(createPixKeyResponse(
+            keyType = TipoDeChaveStub.EMAIL.toString(),
+            key = "alefh@gmail.com"
+        )))
 
         val response = grpcClient.registrar(RegistroChavePixRequest.newBuilder()
-            .setClienteId(randomId.toString())
+            .setClienteId("c56dfef4-7901-44fb-84e2-a2cefb157890")
             .setTipoDeChave(TipoDeChaveStub.EMAIL)
-            .setChave("rponte@gmail.com")
+            .setChave("alefh@gmail.com")
             .setTipoDeConta(TipoDeContaStub.CONTA_CORRENTE)
             .build())
 
@@ -244,10 +241,39 @@ internal class RegistroChaveEndpointTest(
         }
     }
 
+    @Test
+    fun `nao deve registrar chave pix se registro no BCB falhar`() {
+        Mockito.`when`(itauClient.buscaContaPorTipo(clienteId = "c56dfef4-7901-44fb-84e2-a2cefb157890", tipo = "CONTA_CORRENTE"))
+            .thenReturn(HttpResponse.ok(dadosDaContaResponse()))
+
+        Mockito.`when`(bcbClient.registraChave(createPixKeyRequest(
+            keyType = TipoDeChaveStub.EMAIL.toString(),
+            key = "alefh@gmail.com"
+        ))).thenReturn(HttpResponse.badRequest())
+
+        val exception = assertThrows<StatusRuntimeException> {
+            grpcClient.registrar(RegistroChavePixRequest.newBuilder()
+                .setClienteId("c56dfef4-7901-44fb-84e2-a2cefb157890")
+                .setTipoDeChave(TipoDeChaveStub.EMAIL)
+                .setChave("alefh@gmail.com")
+                .setTipoDeConta(TipoDeContaStub.CONTA_CORRENTE)
+                .build())
+        }
+
+        with(exception) {
+            assertEquals(Status.FAILED_PRECONDITION.code, status.code)
+            assertEquals("Erro ao registrar Chave Pix no BCB", status.description)
+        }
+    }
 
     @MockBean(ItauClient::class)
     fun itauClient(): ItauClient? {
         return Mockito.mock(ItauClient::class.java)
+    }
+
+    @MockBean(BcbClient::class)
+    fun bcbClient(): BcbClient? {
+        return Mockito.mock(BcbClient::class.java)
     }
 
     @Factory
@@ -256,5 +282,61 @@ internal class RegistroChaveEndpointTest(
         fun blockingStub(@GrpcChannel(GrpcServerChannel.NAME) channel: ManagedChannel): RegistroPixKeymanagerGrpcServiceGrpc.RegistroPixKeymanagerGrpcServiceBlockingStub {
             return RegistroPixKeymanagerGrpcServiceGrpc.newBlockingStub(channel)
         }
+    }
+
+    private fun dadosDaContaResponse(): DadosDaContaResponse {
+
+        return DadosDaContaResponse(
+            tipo = "CONTA_CORRENTE",
+            instituicao = InstituicaoResponse(
+                nome = "ITAÚ UNIBANCO S.A.",
+                ispb = "60701190"
+            ),
+            agencia = "0001",
+            numero = "483201",
+            titular = TitularResponse(
+                nome = "Alefh Silva",
+                cpf = "83082363083"
+            )
+        )
+    }
+
+    private fun createPixKeyRequest(keyType: String, key: String): CreatePixKeyRequest {
+
+        return CreatePixKeyRequest(
+            keyType = keyType,
+            key = key,
+            bankAccount = BankAccount(
+                participant = "60701190",
+                branch = "0001",
+                accountType = BankAccount.AccountType.CACC,
+                accountNumber = "483201"
+            ),
+            owner = Owner(
+                type = OwnerType.NATURAL_PERSON,
+                name = "Alefh Silva",
+                taxIdNumber = "83082363083"
+            )
+        )
+    }
+
+    private fun createPixKeyResponse(keyType: String, key: String): CreatePixKeyResponse {
+
+        return CreatePixKeyResponse(
+            keyType = keyType,
+            key = key,
+            bankAccount = BankAccount(
+                participant = "60701190",
+                branch = "0001",
+                accountType = BankAccount.AccountType.CACC,
+                accountNumber = "483201"
+            ),
+            owner = Owner(
+                type = OwnerType.NATURAL_PERSON,
+                name = "Alefh Silva",
+                taxIdNumber = "83082363083"
+            ),
+            createdAt = LocalDateTime.now()
+        )
     }
 }

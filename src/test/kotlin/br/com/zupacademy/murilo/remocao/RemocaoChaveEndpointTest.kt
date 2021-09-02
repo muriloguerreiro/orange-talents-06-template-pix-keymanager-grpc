@@ -1,7 +1,11 @@
 package br.com.zupacademy.murilo.remocao
 
+import br.com.zupacademy.murilo.RegistroChavePixRequest
 import br.com.zupacademy.murilo.RemocaoChavePixRequest
 import br.com.zupacademy.murilo.RemocaoPixKeymanagerGrpcServiceGrpc
+import br.com.zupacademy.murilo.bcb.BcbClient
+import br.com.zupacademy.murilo.bcb.DeletePixKeyRequest
+import br.com.zupacademy.murilo.bcb.DeletePixKeyResponse
 import br.com.zupacademy.murilo.chave.*
 import io.grpc.ManagedChannel
 import io.grpc.Status
@@ -10,13 +14,18 @@ import io.micronaut.context.annotation.Bean
 import io.micronaut.context.annotation.Factory
 import io.micronaut.grpc.annotation.GrpcChannel
 import io.micronaut.grpc.server.GrpcServerChannel
+import io.micronaut.http.HttpResponse
+import io.micronaut.test.annotation.MockBean
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.mockito.Mockito
+import java.time.LocalDateTime
 import java.util.*
+import javax.inject.Inject
 
 @MicronautTest(transactional = false)
 internal class RemocaoChaveEndpointTest(
@@ -36,6 +45,9 @@ internal class RemocaoChaveEndpointTest(
             numero = "291900")
     )
 
+    @Inject
+    lateinit var bcbClient: BcbClient
+
     @BeforeEach
     fun setup() {
         repository.deleteAll()
@@ -44,6 +56,12 @@ internal class RemocaoChaveEndpointTest(
 
     @Test
     fun `deve remover chave pix existente`() {
+        Mockito.`when`(bcbClient.removeChave(
+            key = "rponte@gmail.com",
+            request = deletePixKeyRequest("rponte@gmail.com")
+        )).thenReturn(HttpResponse.ok(
+            deletePixKeyResponse("rponte@gmail.com")))
+
         val response = grpcClient.remover(
             RemocaoChavePixRequest.newBuilder()
                 .setClienteId(chave.clienteId.toString())
@@ -108,11 +126,54 @@ internal class RemocaoChaveEndpointTest(
         }
     }
 
+    @Test
+    fun `nao deve remover chave pix se remocao no BCB falhar`() {
+        Mockito.`when`(bcbClient.removeChave(
+            key = "rponte@gmail.com",
+            request = deletePixKeyRequest("rponte@gmail.com")
+        )).thenReturn(HttpResponse.badRequest())
+
+        val exception = assertThrows<StatusRuntimeException> {
+            grpcClient.remover(
+                RemocaoChavePixRequest.newBuilder()
+                    .setClienteId(chave.clienteId.toString())
+                    .setPixId(chave.id.toString())
+                    .build())
+        }
+
+        with(exception) {
+            assertEquals(Status.FAILED_PRECONDITION.code, status.code)
+            assertEquals("Erro ao remover Chave Pix no BCB", status.description)
+        }
+    }
+
+    @MockBean(BcbClient::class)
+    fun bcbClient(): BcbClient? {
+        return Mockito.mock(BcbClient::class.java)
+    }
+
     @Factory
     class Clients {
         @Bean
         fun blockingStub(@GrpcChannel(GrpcServerChannel.NAME) channel: ManagedChannel): RemocaoPixKeymanagerGrpcServiceGrpc.RemocaoPixKeymanagerGrpcServiceBlockingStub {
             return RemocaoPixKeymanagerGrpcServiceGrpc.newBlockingStub(channel)
         }
+    }
+
+    private fun deletePixKeyRequest(key: String): DeletePixKeyRequest {
+
+        return DeletePixKeyRequest(
+            key = key,
+            participant = "60701190"
+        )
+    }
+
+    private fun deletePixKeyResponse(key: String): DeletePixKeyResponse {
+
+        return DeletePixKeyResponse(
+            key = key,
+            participant = "60701190",
+            deletedAt = LocalDateTime.now()
+        )
     }
 }

@@ -20,6 +20,24 @@ data class DadosDaContaResponse(
             numero = this.numero
         )
     }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as DadosDaContaResponse
+
+        if (agencia != other.agencia) return false
+        if (numero != other.numero) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = agencia.hashCode()
+        result = 31 * result + numero.hashCode()
+        return result
+    }
 }
 
 data class InstituicaoResponse(val nome: String, val ispb: String)
